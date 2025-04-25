@@ -244,9 +244,25 @@ class NovelDownloadNode(Node):
             time.sleep(10)
             return False
 
+    def _normalize_url(self, url: str) -> str:
+        """Normalize the URL to standard format: https://www.69shuba.com/book/{id}/"""
+        try:
+            # Extract the book ID from the URL using regex
+            import re
+            match = re.search(r'book/(\d+)', url)
+            if not match:
+                raise ValueError("Could not find book ID in URL")
+            
+            book_id = match.group(1)
+            return f"https://www.69shuba.com/book/{book_id}/"
+        except Exception as e:
+            raise ValueError(f"Invalid URL format: {str(e)}")
+
     async def execute(self, node_inputs: Dict[str, Any], workflow_logger) -> Dict[str, Any]:
         try:
             catalog_url = node_inputs["catalog_url"]
+            # Normalize the URL to standard format
+            catalog_url = self._normalize_url(catalog_url)
             start_chapter = node_inputs.get("start_chapter", 1)  # 1-based
             end_chapter = node_inputs.get("end_chapter", -1)
             output_dir = node_inputs.get("output_dir", ".")
