@@ -59,6 +59,11 @@ class NovelDownloadNode(Node):
             "label": "Error Message",
             "description": "Error message if download failed",
             "type": "STRING"
+        },
+        "novel_dir": {
+            "label": "Novel Directory",
+            "description": "Directory where the novel chapters are saved",
+            "type": "STRING"
         }
     }
 
@@ -77,6 +82,7 @@ class NovelDownloadNode(Node):
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.4472.124 Safari/537.36'
         })
+        self._stop_flag = False
 
     def _fetch_catalog(self, catalog_url: str, workflow_logger) -> Dict[str, Any]:
         """Fetch novel catalog and return novel info"""
@@ -199,6 +205,11 @@ class NovelDownloadNode(Node):
     def _download_chapter(self, chapter_url: str, chapter_index: int, output_dir: str, novel_title: str, workflow_logger) -> bool:
         """Download a single chapter and save it to file"""
         try:
+            # Check if stop was requested
+            if self._stop_flag:
+                workflow_logger.info("Download interrupted by user request")
+                return False
+
             # Skip if chapter already downloaded
             if self._is_chapter_downloaded(output_dir, novel_title, chapter_index):
                 workflow_logger.info(f"Chapter {chapter_index} already downloaded, skipping")
@@ -260,6 +271,9 @@ class NovelDownloadNode(Node):
 
     async def execute(self, node_inputs: Dict[str, Any], workflow_logger) -> Dict[str, Any]:
         try:
+            # Reset stop flag at the start of execution
+            self._stop_flag = False
+            
             catalog_url = node_inputs["catalog_url"]
             # Normalize the URL to standard format
             catalog_url = self._normalize_url(catalog_url)
@@ -287,23 +301,40 @@ class NovelDownloadNode(Node):
                 novel_info["chapters"] = novel_info["chapters"][::-1]
                 workflow_logger.info("Reversed chapter list order")
             
+            # Get novel directory path
+            novel_title = novel_info["title"]
+            if novel_title.endswith("章节列表"):
+                novel_title = novel_title[:-4]
+            novel_dir = os.path.join(output_dir, novel_title)
+            
             workflow_logger.info(f"Starting chapter download for: {novel_info['title']}")
             workflow_logger.info(f"Downloading chapters {start_chapter} to {end_chapter}")
 
             # Download chapters
             for i in range(start_idx, end_idx + 1):
+                # Check if stop was requested
+                if self._stop_flag:
+                    workflow_logger.info("Download interrupted by user request")
+                    return {
+                        "success": False,
+                        "error_message": "Download interrupted by user request",
+                        "novel_dir": novel_dir
+                    }
+                
                 chapter_url = novel_info["chapters"][i]
                 chapter_index = i + 1  # Convert back to 1-based for display
                 if not self._download_chapter(chapter_url, chapter_index, output_dir, novel_info["title"], workflow_logger):
                     return {
                         "success": False,
-                        "error_message": f"Failed to download chapter {chapter_index}"
+                        "error_message": f"Failed to download chapter {chapter_index}",
+                        "novel_dir": novel_dir
                     }
 
             workflow_logger.info("Chapter download completed successfully")
             return {
                 "success": True,
-                "error_message": ""
+                "error_message": "",
+                "novel_dir": novel_dir
             }
 
         except Exception as e:
@@ -311,8 +342,18 @@ class NovelDownloadNode(Node):
             workflow_logger.error(error_msg)
             return {
                 "success": False,
-                "error_message": error_msg
+                "error_message": error_msg,
+                "novel_dir": ""
             }
+            
+    async def stop(self) -> None:
+        """
+        Stop the node execution when interrupted.
+        This method will set the stop flag to interrupt the download process.
+        """
+        self._stop_flag = True
+        # Close the session to release resources
+        self.session.close()
 
 if __name__ == "__main__":
     import asyncio
