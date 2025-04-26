@@ -1,7 +1,7 @@
 from .shuba import *
 
 
-VERSION = "0.0.1"
+VERSION = "0.0.2"
 GIT_URL = "https://github.com/yang0/autotask_book.git"
 NAME = "AutoTask Book"
 DESCRIPTION = """AutoTask Book 是一个小说下载插件，提供以下功能：

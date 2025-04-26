@@ -64,6 +64,11 @@ class NovelDownloadNode(Node):
             "label": "Novel Directory",
             "description": "Directory where the novel chapters are saved",
             "type": "STRING"
+        },
+        "novel_file": {
+            "label": "Novel File",
+            "description": "Path to the combined novel file (output_dir + novel_title + .txt)",
+            "type": "STRING"
         }
     }
 
@@ -269,6 +274,43 @@ class NovelDownloadNode(Node):
         except Exception as e:
             raise ValueError(f"Invalid URL format: {str(e)}")
 
+    def _merge_chapters(self, novel_dir: str, novel_file: str, start_chapter: int, end_chapter: int, workflow_logger) -> bool:
+        """Merge all downloaded chapters into a single text file"""
+        try:
+            workflow_logger.info(f"Merging chapters {start_chapter} to {end_chapter} into {novel_file}")
+            
+            # First check if all chapter files exist
+            missing_chapters = []
+            for i in range(start_chapter, end_chapter + 1):
+                chapter_file = os.path.join(novel_dir, f"chapter_{i:04d}.txt")
+                if not os.path.exists(chapter_file):
+                    missing_chapters.append(i)
+            
+            if missing_chapters:
+                workflow_logger.warning(f"Missing chapter files: {missing_chapters}")
+                return False
+            
+            # Now merge all chapters
+            with open(novel_file, "w", encoding='utf-8', errors='ignore') as outfile:
+                # Write novel title at the beginning
+                outfile.write(f"{os.path.basename(novel_dir)}\n\n")
+                
+                for i in range(start_chapter, end_chapter + 1):
+                    chapter_file = os.path.join(novel_dir, f"chapter_{i:04d}.txt")
+                    with open(chapter_file, "r", encoding='utf-8', errors='ignore') as infile:
+                        content = infile.read().strip()
+                        if content:
+                            outfile.write(content)
+                            outfile.write("\n\n")
+            
+            workflow_logger.info(f"Successfully merged chapters into {novel_file}")
+            return True
+            
+        except Exception as e:
+            error_msg = f"Failed to merge chapters: {str(e)}"
+            workflow_logger.error(error_msg)
+            return False
+
     async def execute(self, node_inputs: Dict[str, Any], workflow_logger) -> Dict[str, Any]:
         try:
             # Reset stop flag at the start of execution
@@ -307,6 +349,9 @@ class NovelDownloadNode(Node):
                 novel_title = novel_title[:-4]
             novel_dir = os.path.join(output_dir, novel_title)
             
+            # Get novel file path
+            novel_file = os.path.join(output_dir, f"{novel_title}.txt")
+            
             workflow_logger.info(f"Starting chapter download for: {novel_info['title']}")
             workflow_logger.info(f"Downloading chapters {start_chapter} to {end_chapter}")
 
@@ -318,7 +363,8 @@ class NovelDownloadNode(Node):
                     return {
                         "success": False,
                         "error_message": "Download interrupted by user request",
-                        "novel_dir": novel_dir
+                        "novel_dir": novel_dir,
+                        "novel_file": novel_file
                     }
                 
                 chapter_url = novel_info["chapters"][i]
@@ -327,14 +373,27 @@ class NovelDownloadNode(Node):
                     return {
                         "success": False,
                         "error_message": f"Failed to download chapter {chapter_index}",
-                        "novel_dir": novel_dir
+                        "novel_dir": novel_dir,
+                        "novel_file": novel_file
                     }
 
-            workflow_logger.info("Chapter download completed successfully")
+            workflow_logger.info("All chapters downloaded, starting merge...")
+            
+            # Merge all chapters into a single file
+            if not self._merge_chapters(novel_dir, novel_file, start_chapter, end_chapter, workflow_logger):
+                return {
+                    "success": False,
+                    "error_message": "Failed to merge chapters",
+                    "novel_dir": novel_dir,
+                    "novel_file": novel_file
+                }
+
+            workflow_logger.info("Chapter download and merge completed successfully")
             return {
                 "success": True,
                 "error_message": "",
-                "novel_dir": novel_dir
+                "novel_dir": novel_dir,
+                "novel_file": novel_file
             }
 
         except Exception as e:
@@ -343,7 +402,8 @@ class NovelDownloadNode(Node):
             return {
                 "success": False,
                 "error_message": error_msg,
-                "novel_dir": ""
+                "novel_dir": "",
+                "novel_file": ""
             }
             
     async def stop(self) -> None:
